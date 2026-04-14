@@ -1,0 +1,31 @@
+[package]
+name = "blockfish-tbp"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-O3", "--strip-debug", "--strip-producers"]
+
+[features]
+default = []
+panic-hook = ["console_error_panic_hook"]
+
+[dependencies]
+blockfish = { path = "../blockfish-engine", default-features = false, features = ["wasm"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tbp = { version = "1.0", features = ["randomizer"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+serde-wasm-bindgen = "0.6"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = [
+    "DedicatedWorkerGlobalScope",
+    "MessageEvent",
+    "console",
+] }
+console_error_panic_hook = { version = "0.1", optional = true }

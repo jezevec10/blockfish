@@ -12,3 +12,7 @@ config/
 dist/
 tags
 tags.temp
+.target-wasm/
+.cargo-wasm-cache/
+.cargo-home/
+blockfish-tbp/pkg/

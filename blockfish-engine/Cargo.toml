@@ -26,6 +26,7 @@ protos = ["protobuf", "protoc-rust"]
 race = ["block-stacker", "argh", "signal-hook"]
 service = ["protos", "pretty_env_logger"]
 slow-tests = []
+wasm = []
 
 [dependencies]
 thiserror = "1.0"

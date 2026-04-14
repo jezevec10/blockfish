@@ -10,6 +10,8 @@ pub mod ai;
 pub use common::{Color, Input, Orientation};
 pub use config::{Config, Parameters};
 pub use matrix::BasicMatrix;
+pub use place::{Place, PlaceFinder};
+pub use shape::{srs, ShapeRef, ShapeTable, Transform};
 
 #[cfg(feature = "block-stacker")]
 mod stacker_util;

@@ -1,6 +1,7 @@
 use crate::{
     config::Config,
-    shape::{srs, ShapeTable},
+    place::PlaceFinder,
+    shape::{srs, ShapeTable, Transform},
     BasicMatrix, Color, Input,
 };
 
@@ -8,6 +9,11 @@ mod analysis;
 mod b_star;
 mod eval;
 mod state;
+
+// Re-exports for external consumers that want to drive the search directly
+// (e.g. `blockfish-tbp` on wasm, where threaded `Analysis` cannot be used).
+pub use b_star::{Search, SearchTerminated, Step};
+pub use state::State;
 
 // Input / output types
 
@@ -102,5 +108,96 @@ impl AI {
         let (tx, rx) = std::sync::mpsc::channel();
         self.all_tx = Some(tx);
         rx
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Synchronous search driver (wasm-friendly alternative to `analysis::spawn`)
+// ---------------------------------------------------------------------------
+
+/// Drives the B* search synchronously to completion (or until the configured
+/// `search_limit` is hit), returning the best move's `(rating, trace)` pair.
+///
+/// Parallel to `analysis::spawn`, but thread-free: no `std::thread`, no
+/// `mpsc`, no `RwLock`. Intended for single-threaded environments like wasm.
+pub fn search_sync(
+    shape_table: &ShapeTable,
+    config: &Config,
+    root: State,
+) -> Option<(i64, Vec<usize>)> {
+    let params = config.parameters.clone();
+    let mut search = Search::new(shape_table, params);
+    search.start(root);
+    let mut best: Option<(i64, Vec<usize>)> = None;
+    while search.node_count() < config.search_limit {
+        match search.step() {
+            Ok(Step::RatingChanged { rating, trace, .. }) => {
+                if best.as_ref().map_or(true, |(r, _)| rating < *r) {
+                    best = Some((rating, trace));
+                }
+            }
+            Ok(Step::SequenceRejected { .. }) | Ok(Step::Other) => {}
+            Err(_) => break, // search fringe exhausted
+        }
+    }
+    best
+}
+
+/// Reconstructs the placement chain for a trace returned by `search_sync`.
+/// Parallel to the private `analysis::reconstruct_inputs`
+/// but yields `(Color, Transform, did_hold)` tuples instead of keystroke inputs,
+/// so the caller can inspect the chosen placement locations directly.
+///
+/// The returned vec has the same length as `trace`.
+pub fn reconstruct_placements(
+    shape_table: &ShapeTable,
+    state0: State,
+    trace: &[usize],
+) -> Vec<(Color, Transform, bool)> {
+    let mut pfind = PlaceFinder::new(shape_table);
+    let mut state = state0;
+    let mut out = Vec::with_capacity(trace.len());
+    for &idx in trace {
+        let pl = state
+            .placements(&mut pfind)
+            .find(|pl| pl.idx == idx)
+            .expect("trace idx out of range");
+        out.push((pl.shape.color(), pl.tf, pl.did_hold));
+        state.place(&pl);
+    }
+    out
+}
+
+#[cfg(test)]
+mod test_sync {
+    use super::*;
+    use crate::Color;
+
+    #[test]
+    fn test_search_sync_empty_board_finds_move() {
+        let shtb = srs();
+        let cfg = Config::default();
+        let snapshot = Snapshot {
+            hold: None,
+            queue: "IOTSZLJ".chars().map(Color::n).collect(),
+            matrix: BasicMatrix::with_cols(10),
+        };
+        let state: State = snapshot.clone().into();
+        let best = search_sync(&shtb, &cfg, state);
+        assert!(
+            best.is_some(),
+            "search_sync should find at least one move on an empty board"
+        );
+        let (_rating, trace) = best.unwrap();
+        assert!(!trace.is_empty(), "trace must not be empty");
+
+        // Walk the placements; each must legally succeed against the current state.
+        let state0: State = snapshot.into();
+        let placements = reconstruct_placements(&shtb, state0, &trace);
+        assert_eq!(placements.len(), trace.len());
+        // All placements have a valid color (the piece originally in the queue).
+        for (color, _tf, _held) in &placements {
+            let _ch = color.as_char();
+        }
     }
 }
